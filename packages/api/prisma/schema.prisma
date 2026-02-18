@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Site {
+  siteId      String   @id @default(uuid()) @map("site_id") @db.Uuid
+  name        String
+  description String?
+  latitude    Float?
+  longitude   Float?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  assets      Asset[]
+  robots      Robot[]
+  missions    Mission[]
+
+  @@map("sites")
+}
+
+model Asset {
+  assetId       String   @id @default(uuid()) @map("asset_id") @db.Uuid
+  siteId        String   @map("site_id") @db.Uuid
+  parentAssetId String?  @map("parent_asset_id") @db.Uuid
+  name          String
+  assetType     String   @map("asset_type")
+  description   String?
+  latitude      Float?
+  longitude     Float?
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  site          Site     @relation(fields: [siteId], references: [siteId])
+  parent        Asset?   @relation("AssetHierarchy", fields: [parentAssetId], references: [assetId])
+  children      Asset[]  @relation("AssetHierarchy")
+  anomalyRules  AnomalyRule[]
+
+  @@map("assets")
+}
+
+model Robot {
+  robotId         String   @id @default(uuid()) @map("robot_id") @db.Uuid
+  name            String
+  model           String   @default("ANYmal X")
+  firmwareVersion String?  @map("firmware_version")
+  siteId          String?  @map("site_id") @db.Uuid
+  status          String   @default("offline")
+  lastSeenAt      DateTime? @map("last_seen_at")
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  site            Site?    @relation(fields: [siteId], references: [siteId])
+  missions        Mission[]
+
+  @@map("robots")
+}
+
+model User {
+  userId       String   @id @default(uuid()) @map("user_id") @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         String   @default("viewer")
+  siteIds      String[] @map("site_ids") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Mission {
+  missionId        String   @id @default(uuid()) @map("mission_id") @db.Uuid
+  robotId          String?  @map("robot_id") @db.Uuid
+  siteId           String   @map("site_id") @db.Uuid
+  name             String
+  description      String?
+  status           String   @default("scheduled")
+  cronExpression   String?  @map("cron_expression")
+  inspectionPoints Json     @default("[]") @map("inspection_points")
+  scheduledAt      DateTime? @map("scheduled_at")
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  metadata         Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  robot            Robot?   @relation(fields: [robotId], references: [robotId])
+  site             Site     @relation(fields: [siteId], references: [siteId])
+
+  @@map("missions")
+}
+
+model AnomalyRule {
+  ruleId             String  @id @default(uuid()) @map("rule_id") @db.Uuid
+  assetId            String? @map("asset_id") @db.Uuid
+  sensorType         String  @map("sensor_type")
+  ruleType           String  @map("rule_type")
+  minThreshold       Float?  @map("min_threshold")
+  maxThreshold       Float?  @map("max_threshold")
+  rateOfChangeLimit  Float?  @map("rate_of_change_limit")
+  windowSize         Int?    @default(1000) @map("window_size")
+  zScoreThreshold    Float?  @default(3.0) @map("z_score_threshold")
+  severity           String  @default("medium")
+  enabled            Boolean @default(true)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  asset              Asset?  @relation(fields: [assetId], references: [assetId])
+
+  @@map("anomaly_rules")
+}

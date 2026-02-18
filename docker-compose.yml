@@ -1,0 +1,302 @@
+services:
+  # ── MQTT Broker ──────────────────────────────────────────
+  emqx:
+    image: emqx/emqx:5.8
+    container_name: anybotics-emqx
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "18083:18083"
+    environment:
+      EMQX_NAME: anybotics
+      EMQX_ALLOW_ANONYMOUS: "true"
+      EMQX_LISTENER__TCP__EXTERNAL: "1883"
+    healthcheck:
+      test: ["CMD", "emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anybotics
+
+  # ── Event Streaming (Kafka-compatible) ───────────────────
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    container_name: anybotics-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --overprovisioned
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr=internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --advertise-pandaproxy-addr=internal://redpanda:8082,external://localhost:18082
+      - --pandaproxy-addr=internal://0.0.0.0:8082,external://0.0.0.0:18082
+    ports:
+      - "19092:19092"
+      - "18081:18081"
+      - "18082:18082"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anybotics
+
+  redpanda-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    container_name: anybotics-redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command: |
+      -c "
+      EXISTING=$$(rpk topic list --brokers redpanda:9092 -f json 2>/dev/null | grep -o '\"name\":\"[^\"]*\"' | sed 's/\"name\":\"//;s/\"//' || true);
+      create_if_missing() { echo \"$$EXISTING\" | grep -qx \"$$1\" || rpk topic create \"$$1\" --brokers redpanda:9092 --partitions $$2 --replicas 1; };
+      create_if_missing robot-telemetry.scalar 12;
+      create_if_missing robot-telemetry.blob-refs 6;
+      create_if_missing robot-telemetry.events 6;
+      create_if_missing robot-anomalies 6;
+      create_if_missing robot-commands 6;
+      create_if_missing robot-telemetry.dead-letter 3;
+      create_if_missing robot-poses 6;
+      echo 'Topics init complete'
+      "
+    networks:
+      - anybotics
+
+  # ── Time-Series Database ─────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: anybotics-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: anybotics
+      POSTGRES_PASSWORD: anybotics
+      POSTGRES_DB: anybotics
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anybotics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anybotics
+
+  # ── Cache / Queue Backing Store ──────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: anybotics-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anybotics
+
+  # ── Object Storage ───────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: anybotics-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anybotics
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: anybotics-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: |
+      -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb local/inspection-data --ignore-existing &&
+      echo 'MinIO bucket created successfully'
+      "
+    networks:
+      - anybotics
+
+  # ══════════════════════════════════════════════════════════
+  # APPLICATION SERVICES
+  # ══════════════════════════════════════════════════════════
+
+  # ── Edge Gateway (MQTT → Kafka) ─────────────────────────
+  edge-gateway:
+    build:
+      context: .
+      dockerfile: packages/edge-gateway/Dockerfile
+    container_name: anybotics-edge-gateway
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: development
+      LOG_LEVEL: info
+      MQTT_BROKER_URL: mqtt://emqx:1883
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_CLIENT_ID: edge-gateway
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: inspection-data
+    depends_on:
+      emqx:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    networks:
+      - anybotics
+
+  # ── Stream Processor (Kafka → TimescaleDB) ──────────────
+  stream-processor:
+    build:
+      context: .
+      dockerfile: packages/stream-processor/Dockerfile
+    container_name: anybotics-stream-processor
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      NODE_ENV: development
+      LOG_LEVEL: info
+      KAFKA_BROKERS: redpanda:9092
+      TIMESCALE_HOST: timescaledb
+      TIMESCALE_PORT: 5432
+      TIMESCALE_USER: anybotics
+      TIMESCALE_PASSWORD: anybotics
+      TIMESCALE_DATABASE: anybotics
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    networks:
+      - anybotics
+
+  # ── API Service (NestJS + Fastify) ──────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    container_name: anybotics-api
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://anybotics:anybotics@timescaledb:5432/anybotics
+      TIMESCALE_HOST: timescaledb
+      TIMESCALE_PORT: 5432
+      TIMESCALE_USER: anybotics
+      TIMESCALE_PASSWORD: anybotics
+      TIMESCALE_DATABASE: anybotics
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: anybotics-dev-secret-change-in-production
+      JWT_ACCESS_EXPIRY: 15m
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - anybotics
+
+  # ── Batch Processor (BullMQ) ────────────────────────────
+  batch-processor:
+    build:
+      context: .
+      dockerfile: packages/batch-processor/Dockerfile
+    container_name: anybotics-batch-processor
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      NODE_ENV: development
+      LOG_LEVEL: info
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TIMESCALE_HOST: timescaledb
+      TIMESCALE_PORT: 5432
+      TIMESCALE_USER: anybotics
+      TIMESCALE_PASSWORD: anybotics
+      TIMESCALE_DATABASE: anybotics
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: inspection-data
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - anybotics
+
+  # ── Dashboard (React Frontend) ─────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: packages/dashboard/Dockerfile
+    container_name: anybotics-dashboard
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - anybotics
+
+volumes:
+  timescaledb-data:
+  redis-data:
+  minio-data:
+
+networks:
+  anybotics:
+    driver: bridge

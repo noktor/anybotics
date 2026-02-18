@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package anybotics.mission;
+
+import "google/protobuf/timestamp.proto";
+
+message Mission {
+  string mission_id = 1;
+  string robot_id = 2;
+  string site_id = 3;
+  string name = 4;
+  string description = 5;
+  MissionStatus status = 6;
+  string cron_expression = 7;
+  repeated InspectionPoint inspection_points = 8;
+  google.protobuf.Timestamp scheduled_at = 9;
+  google.protobuf.Timestamp started_at = 10;
+  google.protobuf.Timestamp completed_at = 11;
+  map<string, string> metadata = 12;
+}
+
+message MissionCommand {
+  string mission_id = 1;
+  string robot_id = 2;
+  CommandType command_type = 3;
+  repeated InspectionPoint inspection_points = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+message MissionStatusUpdate {
+  string mission_id = 1;
+  string robot_id = 2;
+  MissionStatus status = 3;
+  string current_inspection_point_id = 4;
+  int32 progress_percent = 5;
+  string message = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message InspectionPoint {
+  string point_id = 1;
+  string asset_id = 2;
+  string name = 3;
+  double latitude = 4;
+  double longitude = 5;
+  double altitude = 6;
+  repeated string sensor_types = 7;
+}
+
+enum MissionStatus {
+  MISSION_STATUS_UNSPECIFIED = 0;
+  SCHEDULED = 1;
+  DISPATCHED = 2;
+  RUNNING = 3;
+  COMPLETED = 4;
+  FAILED = 5;
+  CANCELLED = 6;
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  START = 1;
+  PAUSE = 2;
+  RESUME = 3;
+  ABORT = 4;
+}

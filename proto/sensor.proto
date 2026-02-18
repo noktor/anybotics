@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package anybotics.sensor;
+
+import "google/protobuf/timestamp.proto";
+
+message SensorReading {
+  string robot_id = 1;
+  string asset_id = 2;
+  string sensor_id = 3;
+  SensorType sensor_type = 4;
+  double value = 5;
+  string unit = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  map<string, string> metadata = 8;
+  int32 quality = 9;
+}
+
+message BlobReference {
+  string robot_id = 1;
+  string asset_id = 2;
+  string sensor_id = 3;
+  BlobType blob_type = 4;
+  string blob_uri = 5;
+  int64 size_bytes = 6;
+  string content_type = 7;
+  google.protobuf.Timestamp timestamp = 8;
+  string mission_id = 9;
+  map<string, string> metadata = 10;
+}
+
+message SensorBatch {
+  repeated SensorReading readings = 1;
+  string robot_id = 2;
+  string mission_id = 3;
+}
+
+enum SensorType {
+  SENSOR_TYPE_UNSPECIFIED = 0;
+  TEMPERATURE = 1;
+  PRESSURE = 2;
+  VIBRATION = 3;
+  GAS_CONCENTRATION = 4;
+  HUMIDITY = 5;
+  ACOUSTIC = 6;
+  ELECTRICAL = 7;
+}
+
+enum BlobType {
+  BLOB_TYPE_UNSPECIFIED = 0;
+  THERMAL_IMAGE = 1;
+  RGB_IMAGE = 2;
+  POINT_CLOUD = 3;
+  AUDIO_CLIP = 4;
+}

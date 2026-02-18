@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package anybotics.anomaly;
+
+import "google/protobuf/timestamp.proto";
+
+message AnomalyEvent {
+  string anomaly_id = 1;
+  string robot_id = 2;
+  string asset_id = 3;
+  string sensor_id = 4;
+  Severity severity = 5;
+  AnomalyType anomaly_type = 6;
+  string description = 7;
+  double value = 8;
+  double threshold = 9;
+  string blob_ref = 10;
+  google.protobuf.Timestamp timestamp = 11;
+  map<string, string> metadata = 12;
+}
+
+message AnomalyRule {
+  string rule_id = 1;
+  string asset_id = 2;
+  string sensor_type = 3;
+  RuleType rule_type = 4;
+  double min_threshold = 5;
+  double max_threshold = 6;
+  double rate_of_change_limit = 7;
+  int32 window_size = 8;
+  double z_score_threshold = 9;
+  Severity severity = 10;
+  bool enabled = 11;
+}
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  LOW = 1;
+  MEDIUM = 2;
+  HIGH = 3;
+  CRITICAL = 4;
+}
+
+enum AnomalyType {
+  ANOMALY_TYPE_UNSPECIFIED = 0;
+  THRESHOLD_VIOLATION = 1;
+  RATE_OF_CHANGE = 2;
+  STATISTICAL_OUTLIER = 3;
+  MISSING_DATA = 4;
+  ML_DETECTED = 5;
+}
+
+enum RuleType {
+  RULE_TYPE_UNSPECIFIED = 0;
+  ABSOLUTE_THRESHOLD = 1;
+  RATE_OF_CHANGE_RULE = 2;
+  Z_SCORE = 3;
+  BOLLINGER_BAND = 4;
+  EWMA = 5;
+}
