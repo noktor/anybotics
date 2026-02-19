@@ -19,6 +19,7 @@
  *   ANOMALY_RATE     (default: 0.003)
  */
 
+import 'dotenv/config';
 import * as mqtt from 'mqtt';
 
 const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';

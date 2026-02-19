@@ -30,5 +30,7 @@ export interface RobotPose {
   siteId?: string;
   missionId?: string;
   waypointIndex?: number;
+  state?: 'traveling' | 'inspecting' | 'returning_to_dock' | 'charging';
+  currentWaypoint?: string;
   metadata?: Record<string, string>;
 }
